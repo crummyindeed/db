@@ -1,0 +1,31 @@
+{
+  "name": "crummydb",
+  "version": "0.1.1",
+  "description": "A fully NodeJS KVStore Database",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crummyindeed/db.git"
+  },
+  "keywords": [
+    "crummyindeed",
+    "kvstore",
+    "key value",
+    "node",
+    "js",
+    "database"
+  ],
+  "author": "Cody Crumrine",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/crummyindeed/db/issues"
+  },
+  "homepage": "https://github.com/crummyindeed/db#readme",
+  "devDependencies": {
+    "chai": "^4.2.0",
+    "mocha": "^7.1.1"
+  }
+}
