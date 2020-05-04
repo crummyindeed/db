@@ -10,3 +10,21 @@
 
 ## how
 
+```javascript
+const DB = require('crummydb');
+
+//Initialize
+var directory = 'testDir'; //data stored here
+db = new Naive(directory);
+await db.init();
+
+//Upsert a Value
+db.put('myKey','My Cool Value');
+
+//Retrieve a Value
+await db.get('myKey');
+
+//Remove a Value
+db.delete('myKey');
+
+```
