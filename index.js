@@ -5,6 +5,8 @@ const stream = require('stream');
 
 const SEP = String.fromCharCode(0x1f);
 const DEL = "__DEL__";
+const LOGMAX = 4000000;
+const SSTMAX = 2000000;
 
 /*
   Utility Functions that make async file operations easier
@@ -55,7 +57,7 @@ Naive.prototype.put = async function (key, value) {
   this.logsize += Buffer.byteLength(insert, 'utf8');
   this.diskLog.write(insert);
   this.memLog[key] = value;
-  if (this.logsize >= 50) {
+  if (this.logsize >= LOGMAX) {
     await this.newMemLog();
   }
 }
@@ -147,21 +149,20 @@ Naive.prototype.newMemLog = async function () {
     path.join(this.directory, log_name)
   );
   this.diskLog = fs.createWriteStream(path.join(self.directory, 'current.log'), { 'flags': 'a' });
-  return new Promise(async function (resolve, reject) {
-    var young_dir = path.join(self.directory, 'young');
-    await ensureFullPath(young_dir);
-    var files = await self.memToSST(memLog, young_dir);
-    for (let i in files) {
-      var young_file = files[i].filename;
-      var range = files[i].range;
-      await self.addFileToManifest('young', young_file, range.min_key, range.max_key);
-    }
-    if (self.manifest.young.length > 4) {
-      await self.runCompaction();
-    }
-    fs.unlinkSync(path.join(self.directory, log_name));
-    resolve(true);
-  });
+  this.logsize = 0;
+  var young_dir = path.join(self.directory, 'young');
+  await ensureFullPath(young_dir);
+  var files = await self.memToSST(memLog, young_dir);
+  for (let i in files) {
+    var young_file = files[i].filename;
+    var range = files[i].range;
+    await self.addFileToManifest('young', young_file, range.min_key, range.max_key);
+  }
+  if (self.manifest.young.length >= 4) {
+    await self.runCompaction();
+  }
+  fs.unlinkSync(path.join(self.directory, log_name));
+  return true;
 }
 
 Naive.prototype.addFileToManifest = async function (level, filename, min, max) {
@@ -171,6 +172,22 @@ Naive.prototype.addFileToManifest = async function (level, filename, min, max) {
   this.manifest[level].push({ filename, min, max });
   await this.saveManifest();
   this.trimManifest();
+}
+
+Naive.prototype.removeFileFromManifest = async function (level, filename) {
+  var found = false;
+  for (let i in this.manifest[level]) {
+    if (this.manifest[level][i].filename == filename) {
+      found = i;
+      break;
+    }
+  }
+  if (found !== false) {
+    this.manifest[level].splice(found, 1);
+    await this.saveManifest();
+    this.trimManifest();
+    fs.unlinkSync(filename);
+  }
 }
 
 Naive.prototype.trimManifest = async function () {
@@ -203,7 +220,7 @@ Naive.prototype.fileToMem = async function (file) {
 Naive.prototype.memToSST = async function (mem_table, directory) {
   return new Promise(async function (resolve, reject) {
     try {
-      var limit = 50;
+      var limit = SSTMAX;
       var files = [];
       var time = Date.now();
       var filename = path.join(directory, time + '.sst');
@@ -212,32 +229,40 @@ Naive.prototype.memToSST = async function (mem_table, directory) {
       var keys = Object.keys(mem_table);
       keys.sort();
       var min_key = keys[0];
-      var max_key = keys[keys.length - 1];
+      var max_key = keys[0];
+
       for (let i in keys) {
+        max_key = keys[i];
+        if (total == 0) {
+          min_key = keys[i];
+        }
         var insert = keys[i] + SEP + mem_table[keys[i]] + '\n';
         total += Buffer.byteLength(insert, 'utf8');
+        fh.write(insert);
         if (total > limit) {
           files.push({
             filename: filename,
             range: { min_key, max_key }
           });
-          min_key = keys[i];
-          max_key = keys[i];
           var o_time = time;
-          var time = Date.now();
           if (time == o_time) {
             time += files.length;
           }
-          var filename = path.join(directory, time + '.sst');
-          var fh = fs.createWriteStream(filename, { 'flags': 'a' });
+
           total = 0;
+          if (keys.length - 1 > i) {
+            var filename = path.join(directory, time + '_' + files.length + '.sst');
+            var fh = fs.createWriteStream(filename, { 'flags': 'a' });
+          }
         }
-        fh.write(insert);
       }
-      files.push({
-        filename: filename,
-        range: { min_key, max_key }
-      });
+
+      if (total > 0) {
+        files.push({
+          filename: filename,
+          range: { min_key, max_key }
+        });
+      }
       resolve(files);
     } catch (e) {
       reject(e);
@@ -247,50 +272,112 @@ Naive.prototype.memToSST = async function (mem_table, directory) {
 
 Naive.prototype.runCompaction = async function () {
   var self = this;
-  return new Promise(async function (resolve, reject) {
-    var young_files = self.manifest['young'];
-    self.manifest['young'] = [];
-    var remove = [];
-    var mem_temp = {};
-    var merge_min = undefined;
-    var merge_max = undefined;
-    for (let i in young_files) {
-      if (merge_min > young_files[i].min || merge_min == undefined) { merge_min = young_files[i].min; }
-      if (merge_max < young_files[i].max || merge_max == undefined) { merge_max = young_files[i].max; }
-      var temp = await self.fileToMem(young_files[i].filename);
-      mem_table = Object.assign(mem_temp, temp);
-      remove.push(young_files[i].filename);
-    }
-    if (typeof self.manifest['level1'] != 'undefined') {
-      var l1_files = JSON.parse(JSON.stringify(self.manifest['level1'])); //yuck..
-      var stupid_offset = 0; //yuck...!
-      for (let i in l1_files) {
-        if ((l1_files[i].min >= merge_min && l1_files[i].min <= merge_max)
-          || (l1_files[i].max >= merge_min && l1_files[i].max <= merge_max)
-        ) {
-
-          var temp = await self.fileToMem(l1_files[i].filename);
-          mem_table = Object.assign(temp, mem_table);
-          self.manifest.level1.splice(i - stupid_offset, 1); //yuck...!!
-          stupid_offset++;//YUCK!!
-          if (remove.indexOf(l1_files[i].filename))
-            remove.push(l1_files[i].filename);
+  var young_files = self.manifest['young'];
+  var remove_young = [];
+  var remove_l1 = [];
+  var mem_temp = {};
+  var merge_min = undefined;
+  var merge_max = undefined;
+  for (let i in young_files) {
+    if (merge_min > young_files[i].min || merge_min == undefined) { merge_min = young_files[i].min; }
+    if (merge_max < young_files[i].max || merge_max == undefined) { merge_max = young_files[i].max; }
+    var temp = await self.fileToMem(young_files[i].filename);
+    mem_table = Object.assign(mem_temp, temp);
+    remove_young.push(young_files[i].filename);
+  }
+  if (typeof self.manifest['level1'] != 'undefined') {
+    var l1_files = self.manifest['level1'];
+    for (let i in l1_files) {
+      if ((l1_files[i].min >= merge_min && l1_files[i].min <= merge_max)
+        || (l1_files[i].max >= merge_min && l1_files[i].max <= merge_max)
+        || (l1_files[i].min <= merge_min && l1_files[i].max >= merge_max)
+      ) {
+        var temp = await self.fileToMem(l1_files[i].filename);
+        mem_table = Object.assign(temp, mem_table);
+        if (remove_l1.indexOf(l1_files[i].filename)) {
+          remove_l1.push(l1_files[i].filename);
         }
       }
     }
-    await ensureFullPath(path.join(self.directory, 'level1'));
-    var directory = path.join(self.directory, 'level1');
-    var files = await self.memToSST(mem_table, directory);
-    for (let i in files) {
-      var new_filename = files[i].filename;
-      var range = files[i].range;
-      await self.addFileToManifest('level1', new_filename, range.min_key, range.max_key);
+  }
+  await ensureFullPath(path.join(self.directory, 'level1'));
+  var directory = path.join(self.directory, 'level1');
+  var files = await self.memToSST(mem_table, directory);
+  for (let i in files) {
+    var new_filename = files[i].filename;
+    var range = files[i].range;
+    await self.addFileToManifest('level1', new_filename, range.min_key, range.max_key);
+  }
+  for (let i in remove_young) {
+    await self.removeFileFromManifest('young', remove_young[i]);
+  }
+  for (let i in remove_l1) {
+    await self.removeFileFromManifest('level1', remove_l1[i]);
+  }
+  await self.compactLevel(1);
+  return true;
+}
+
+Naive.prototype.compactLevel = async function (level) {
+  var self = this;
+  var remove_my = [];
+  var my_level = 'level' + level;
+  var next_level = 'level' + (level + 1);
+  var my_limit = Math.pow(10, level);
+  if (typeof self.manifest[my_level] == 'undefined') {
+    return;
+  }
+  var my_files = self.manifest[my_level];
+  if (my_files.length <= my_limit) {
+    return;
+  }
+  var remove_next = [];
+  var mem_temp = {};
+  var merge_min = undefined;
+  var merge_max = undefined;
+  var mem_temp = {};
+
+  for (let i = 0; i < (my_files.length - my_limit) + 1; i++) {
+    if (merge_min > my_files[i].min || merge_min == undefined) { merge_min = my_files[i].min; }
+    if (merge_max < my_files[i].max || merge_max == undefined) { merge_max = my_files[i].max; }
+    var temp = await self.fileToMem(my_files[i].filename);
+    mem_temp = Object.assign(mem_temp, temp);
+    remove_my.push(my_files[i].filename);
+  }
+
+  if (typeof self.manifest[next_level] != 'undefined') {
+    var next_files = self.manifest[next_level];
+    for (let i in next_files) {
+      if ((next_files[i].min >= merge_min && next_files[i].min <= merge_max)
+        || (next_files[i].max >= merge_min && next_files[i].max <= merge_max)
+        || (next_files[i].min <= merge_min && next_files[i].max >= merge_max)
+      ) {
+        var temp = await self.fileToMem(next_files[i].filename);
+        mem_temp = Object.assign(temp, mem_temp);
+        if (remove_next.indexOf(next_files[i].filename)) {
+          remove_next.push(next_files[i].filename);
+        }
+      }
     }
-    for (let i in remove) {
-      fs.unlinkSync(remove[i]);
-    }
-    resolve(true);
-  });
+  }
+  await ensureFullPath(path.join(self.directory, next_level));
+  var directory = path.join(self.directory, next_level);
+  var files = await self.memToSST(mem_temp, directory);
+  for (let i in files) {
+    var new_filename = files[i].filename;
+    var range = files[i].range;
+    await self.addFileToManifest(next_level, new_filename, range.min_key, range.max_key);
+  }
+  for (let i in remove_my) {
+    await self.removeFileFromManifest(my_level, remove_my[i]);
+  }
+  for (let i in remove_next) {
+    await self.removeFileFromManifest(next_level, remove_next[i]);
+  }
+  await this.compactLevel(level + 1);
+  if (mem_temp['key1400'] != undefined) {
+  }
+  return;
 }
 
 Naive.prototype.search = async function (key) {
@@ -320,8 +407,12 @@ Naive.prototype.search = async function (key) {
         for (let i in self.manifest['level' + lvl]) {
           if (self.manifest['level' + lvl][i].min <= key && self.manifest['level' + lvl][i].max >= key) {
             var value = await self.checkFile(self.manifest['level' + lvl][i].filename, key);
-            resolve(value);
-            return;
+            if (value !== false) {
+              resolve(value);
+              return;
+            } else {
+              break; //if we matched the range we can give up on this level, go to next
+            }
           }
         }
       }
@@ -343,16 +434,3 @@ Naive.prototype.checkFile = async function (filename, key) {
 }
 
 module.exports = Naive;
-/*
-async function main() {
-  var db = new Naive('testDir');
-  await db.init();
-  console.log(await db.get('alpha'));
-  db.put('alpha', 'alan');
-  console.log(await db.get('alpha'));
-  db.delete('alpha');
-  console.log(await db.get('alpha'));
-  db.put('charles', 'owjdowjdowdowjodwjdowjod');
-  await db.newMemLog();
-} main();
-*/

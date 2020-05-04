@@ -1,5 +1,6 @@
 const Naive = require('.');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const expect = require("chai").expect;
 
@@ -71,7 +72,7 @@ describe('get()', function () {
   it('should return false for a deleted value', function () {
     return new Promise(async function (resolve, reject) {
       try {
-        db.delete('key1');
+        await db.delete('key1');
         expect(await db.get('key1')).to.be.false;
         resolve(true);
       } catch (error) {
@@ -93,4 +94,91 @@ describe('delete()', function () {
       }
     });
   });
+});
+
+describe('bulk', function () {
+  it('~8MB Test', function () {
+    return new Promise(async function (resolve, reject) {
+      try {
+        var test_checks = [];
+        for (var i = 0; i < 20000; i++) {
+          var key = 'key' + i;
+          var val = crypto.randomBytes(400).toString('hex');
+          await db.put(key, val);
+          if (i % 200 == 0) {
+            test_checks.push({ key, val });
+          }
+        }
+        for (let i in test_checks) {
+          expect(test_checks[i].key + ':' + await db.get(test_checks[i].key)).to.equal(test_checks[i].key + ':' + test_checks[i].val);
+        }
+        resolve(true);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }).timeout(20000);
+  it('~16MB Test', function () {
+    return new Promise(async function (resolve, reject) {
+      try {
+        var test_checks = [];
+        for (var i = 0; i < 40000; i++) {
+          var key = 'key' + i;
+          var val = crypto.randomBytes(400).toString('hex');
+          await db.put(key, val);
+          if (i % 400 == 0) {
+            test_checks.push({ key, val });
+          }
+        }
+        for (let i in test_checks) {
+          expect(test_checks[i].key + ':' + await db.get(test_checks[i].key)).to.equal(test_checks[i].key + ':' + test_checks[i].val);
+        }
+        resolve(true);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }).timeout(20000);
+  it('~32MB Test', function () {
+    return new Promise(async function (resolve, reject) {
+      try {
+        var test_checks = [];
+        for (var i = 0; i < 80000; i++) {
+          var key = 'key' + i;
+          var val = crypto.randomBytes(400).toString('hex');
+          await db.put(key, val);
+          if (i % 800 == 0) {
+            test_checks.push({ key, val });
+          }
+        }
+        for (let i in test_checks) {
+          expect(test_checks[i].key + ':' + await db.get(test_checks[i].key)).to.equal(test_checks[i].key + ':' + test_checks[i].val);
+        }
+        resolve(true);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }).timeout(40000);
+  it('~64MB Test', function () {
+    return new Promise(async function (resolve, reject) {
+      try {
+        var test_checks = [];
+        for (var i = 0; i < 80000; i++) {
+          var key = 'key' + i;
+          var val = crypto.randomBytes(800).toString('hex');
+          await db.put(key, val);
+          if (i % 1600 == 0) {
+            test_checks.push({ key, val });
+          }
+        }
+        for (let i in test_checks) {
+          expect(test_checks[i].key + ':' + await db.get(test_checks[i].key)).to.equal(test_checks[i].key + ':' + test_checks[i].val);
+        }
+        resolve(true);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }).timeout(40000);
 });

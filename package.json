@@ -1,6 +1,6 @@
 {
   "name": "crummydb",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A fully NodeJS KVStore Database",
   "main": "index.js",
   "scripts": {
