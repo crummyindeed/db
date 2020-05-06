@@ -39,19 +39,19 @@ const ensureFullPath = async function (directory) {
   Interface
 */
 
-const Naive = function (directory) {
+const CrummyDB = function (directory) {
   this.directory = directory;
   this.logsize = 0;
 }
 
-Naive.prototype.init = async function () {
+CrummyDB.prototype.init = async function () {
   this.manifest = await this.getManifest();
   this.memLog = await this.getMemLog();
   this.diskLog = fs.createWriteStream(path.join(this.directory, 'current.log'), { 'flags': 'a' });
   return true;
 }
 
-Naive.prototype.put = async function (key, value) {
+CrummyDB.prototype.put = async function (key, value) {
   value = JSON.stringify(value);
   var insert = key + SEP + value + '\n';
   this.logsize += Buffer.byteLength(insert, 'utf8');
@@ -62,7 +62,7 @@ Naive.prototype.put = async function (key, value) {
   }
 }
 
-Naive.prototype.get = async function (key) {
+CrummyDB.prototype.get = async function (key) {
   var self = this;
   return new Promise(async function (resolve, reject) {
     var mem_val = self.memLog[key];
@@ -79,14 +79,14 @@ Naive.prototype.get = async function (key) {
   });
 }
 
-Naive.prototype.delete = async function (key) {
+CrummyDB.prototype.delete = async function (key) {
   await this.put(key, DEL);
 }
 /*
   Background
 */
 
-Naive.prototype.getManifest = async function () {
+CrummyDB.prototype.getManifest = async function () {
   var self = this;
   return new Promise(async function (resolve, reject) {
     await ensureFullPath(path.join(self.directory, 'manifest'));
@@ -105,7 +105,7 @@ Naive.prototype.getManifest = async function () {
   });
 }
 
-Naive.prototype.saveManifest = async function () {
+CrummyDB.prototype.saveManifest = async function () {
   var self = this;
   return new Promise(function (resolve, reject) {
     var file = path.join(self.directory, 'manifest', Date.now() + '.json');
@@ -120,7 +120,7 @@ Naive.prototype.saveManifest = async function () {
   });
 }
 
-Naive.prototype.getMemLog = async function () {
+CrummyDB.prototype.getMemLog = async function () {
   var self = this;
   return new Promise((resolve, reject) => {
     var log_file = path.join(this.directory, 'current.log');
@@ -137,7 +137,7 @@ Naive.prototype.getMemLog = async function () {
   });
 }
 
-Naive.prototype.newMemLog = async function () {
+CrummyDB.prototype.newMemLog = async function () {
   var self = this;
   var memLog = this.memLog;
   this.memLog = {};
@@ -165,7 +165,7 @@ Naive.prototype.newMemLog = async function () {
   return true;
 }
 
-Naive.prototype.addFileToManifest = async function (level, filename, min, max) {
+CrummyDB.prototype.addFileToManifest = async function (level, filename, min, max) {
   if (typeof this.manifest[level] == 'undefined') {
     this.manifest[level] = [];
   }
@@ -174,7 +174,7 @@ Naive.prototype.addFileToManifest = async function (level, filename, min, max) {
   this.trimManifest();
 }
 
-Naive.prototype.removeFileFromManifest = async function (level, filename) {
+CrummyDB.prototype.removeFileFromManifest = async function (level, filename) {
   var found = false;
   for (let i in this.manifest[level]) {
     if (this.manifest[level][i].filename == filename) {
@@ -190,7 +190,7 @@ Naive.prototype.removeFileFromManifest = async function (level, filename) {
   }
 }
 
-Naive.prototype.trimManifest = async function () {
+CrummyDB.prototype.trimManifest = async function () {
   var limit = 100;
   var trim = 50;
   var list = fs.readdirSync(path.join(this.directory, 'manifest'));
@@ -201,7 +201,7 @@ Naive.prototype.trimManifest = async function () {
   }
 }
 
-Naive.prototype.fileToMem = async function (file) {
+CrummyDB.prototype.fileToMem = async function (file) {
   return new Promise(function (resolve, reject) {
     var mem_copy = {};
     var instream = fs.createReadStream(file);
@@ -217,7 +217,7 @@ Naive.prototype.fileToMem = async function (file) {
   });
 }
 
-Naive.prototype.memToSST = async function (mem_table, directory) {
+CrummyDB.prototype.memToSST = async function (mem_table, directory) {
   return new Promise(async function (resolve, reject) {
     try {
       var limit = SSTMAX;
@@ -270,7 +270,7 @@ Naive.prototype.memToSST = async function (mem_table, directory) {
   });
 }
 
-Naive.prototype.runCompaction = async function () {
+CrummyDB.prototype.runCompaction = async function () {
   var self = this;
   var young_files = self.manifest['young'];
   var remove_young = [];
@@ -318,7 +318,7 @@ Naive.prototype.runCompaction = async function () {
   return true;
 }
 
-Naive.prototype.compactLevel = async function (level) {
+CrummyDB.prototype.compactLevel = async function (level) {
   var self = this;
   var remove_my = [];
   var my_level = 'level' + level;
@@ -380,7 +380,7 @@ Naive.prototype.compactLevel = async function (level) {
   return;
 }
 
-Naive.prototype.search = async function (key) {
+CrummyDB.prototype.search = async function (key) {
   var self = this;
   return new Promise(async function (resolve, reject) {
     var value = false;
@@ -423,7 +423,7 @@ Naive.prototype.search = async function (key) {
   });
 }
 
-Naive.prototype.checkFile = async function (filename, key) {
+CrummyDB.prototype.checkFile = async function (filename, key) {
   //Can implement caching here if we want later
   var mem_copy = await this.fileToMem(filename);
   if (typeof mem_copy[key] != 'undefined') {
@@ -433,4 +433,4 @@ Naive.prototype.checkFile = async function (filename, key) {
   }
 }
 
-module.exports = Naive;
+module.exports = CrummyDB;
