@@ -1,4 +1,4 @@
-const Naive = require('.');
+const CrummyDB = require('.');
 const fs = require('fs');
 const crypto = require('crypto');
 
@@ -10,7 +10,7 @@ describe('init()', function () {
   it('should should create a directory matching the dir in the contstrcutor', function () {
     return new Promise(async function (resolve, reject) {
       var directory = 'testDir';
-      db = new Naive(directory);
+      db = new CrummyDB(directory);
       await db.init();
       fs.access(directory, fs.constants.F_OK, async function (err) {
         if (err) {
